@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GitHub Tracker Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+        }
+        #inputSection {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        input, button {
+            padding: 8px;
+            margin: 5px;
+            font-size: 14px;
+        }
+        #userDetails {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 30px;
+            padding: 15px;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            gap: 20px;
+        }
+        #userDetails img {
+            width: 90px;
+            border-radius: 50%;
+            border: 2px solid #333;
+        }
+        #userDetails div {
+            text-align: left;
+        }
+        #charts {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 30px;
+            justify-items: center;
+        }
+        canvas {
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            width: 350px !important;
+            height: 250px !important;
+        }
+    </style>
+</head>
+<body>
+    <h1>GitHub Tracker Dashboard</h1>
+
+    <div id="inputSection">
+        <input type="text" id="username" placeholder="Enter GitHub username">
+        <button onclick="fetchData()">Fetch Repos</button>
+    </div>
+
+    <div id="userDetails"></div>
+
+    <div id="charts">
+        <canvas id="repoChart"></canvas>
+        <canvas id="langChart"></canvas>
+    </div>
+
+    <script>
+        async function fetchData() {
+            const username = document.getElementById('username').value.trim();
+            if (!username) return alert('Enter username');
+
+            // --- Fetch user details ---
+            const userRes = await fetch(`https://api.github.com/users/${username}`);
+            if (!userRes.ok) return alert('User not found');
+            const userData = await userRes.json();
+
+            document.getElementById('userDetails').innerHTML = `
+                <img src="${userData.avatar_url}" alt="avatar">
+                <div>
+                    <h3>${userData.name || userData.login}</h3>
+                    <p>Followers: ${userData.followers} | Following: ${userData.following}</p>
+                    <p>Public Repos: ${userData.public_repos}</p>
+                </div>
+            `;
+
+            // --- Store repos in backend ---
+            await fetch('/fetch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username })
+            });
+
+            // --- Get repo data for charts ---
+            const repoRes = await fetch(`/chart/${username}`);
+            const repos = await repoRes.json();
+
+            // --- Repo Chart ---
+            const repoNames = repos.map(r => r.name);
+            const stars = repos.map(r => r.stars);
+            const forks = repos.map(r => r.forks);
+
+            new Chart(document.getElementById('repoChart'), {
+                type: 'bar',
+                data: {
+                    labels: repoNames,
+                    datasets: [
+                        { label: 'Stars', data: stars, backgroundColor: 'rgba(75,192,192,0.6)' },
+                        { label: 'Forks', data: forks, backgroundColor: 'rgba(153,102,255,0.6)' }
+                    ]
+                },
+                options: {
+                    responsive: false,
+                    plugins: { legend: { position: 'top' } },
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+
+            // --- Language Chart (all languages) ---
+            const langCount = {};  // { language: totalBytes }
+            await Promise.all(repos.map(async (repo) => {
+                try {
+                    const langRes = await fetch(`https://api.github.com/repos/${username}/${repo.name}/languages`);
+                    const langs = await langRes.json();
+                    for (let [lang, bytes] of Object.entries(langs)) {
+                        langCount[lang] = (langCount[lang] || 0) + bytes;
+                    }
+                } catch (err) {
+                    console.log('Error fetching languages for repo', repo.name);
+                }
+            }));
+
+            const languages = Object.keys(langCount);
+            const counts = Object.values(langCount);
+
+            new Chart(document.getElementById('langChart'), {
+                type: 'bar',
+                data: {
+                    labels: languages,
+                    datasets: [{
+                        label: 'All Languages Used (by bytes)',
+                        data: counts,
+                        backgroundColor: 'rgba(255,159,64,0.6)'
+                    }]
+                },
+                options: {
+                    responsive: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
